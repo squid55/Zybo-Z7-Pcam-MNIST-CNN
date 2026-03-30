@@ -2,7 +2,7 @@
 
 Zybo Z7-20 + Pcam-5C 카메라를 사용한 **실시간 MNIST 손글씨 숫자 인식** FPGA 프로젝트.
 
-> **[FPGA CNN 하드웨어 설계 완전 가이드 (학생용)](docs/HARDWARE_DESIGN_GUIDE_KR.md)** — 모든 VHDL 모듈의 동작 원리를 그림과 비유로 설명합니다.
+> **[FPGA CNN 하드웨어 설계 가이드](docs/HARDWARE_DESIGN_GUIDE_KR.md)** — 모든 VHDL 모듈의 동작 원리를 그림과 비유로 설명합니다.
 
 ## 시스템 구조
 
