@@ -220,4 +220,48 @@ Vivado ILA를 Broadcaster M01 출력에 연결하여:
 
 ---
 
-*작성: 2026-04-02 — CNN 실보드 디버깅 분석*
+---
+
+## 8. 시뮬레이션 검증 결과 (2026-04-02)
+
+### xsim 실행 결과
+
+```
+Note: === Frame 0 start ===
+Note: >> Prediction changed: 9 (prob=12)
+Note: === Frame 0 end === Prediction=9 Probability=12
+Note: === Frame 1 start ===
+Note: >> Prediction changed: 3 (prob=214)
+Note: === Frame 1 end === Prediction=3 Probability=214
+Note: === FINAL RESULT === Prediction=3 Probability=214
+```
+
+- **CNN VHDL 로직은 시뮬레이션에서 정상 동작** (비-제로 Prediction/Probability 출력)
+- 시뮬레이션 소요: 12초 (16.5ms 시뮬레이션 시간)
+
+### 결론: 문제는 `pixel_clk`의 FPGA 구현
+
+| | 시뮬레이션 | 실제 FPGA |
+|---|---|---|
+| CNN 결과 | Prediction=3, Prob=214 | Prediction=0, Prob=0 |
+| pixel_clk | 이상적 (지연 없음) | 클럭 트리 미사용 → 타이밍 위반 |
+| falling_edge 사용 | 정상 동작 | 양에지 라우팅 불가 가능성 |
+
+시뮬레이션에서는 `pixel_clk`의 rising/falling edge가 완벽하게 동작하지만, FPGA에서는:
+1. 플립플롭 출력 → 일반 패브릭 라우팅 (높은 스큐)
+2. BUFG 삽입해도 생성 클럭의 **타이밍 제약이 Vivado에 정의되지 않음**
+3. CDC(Clock Domain Crossing) 문제: aclk(150MHz) ↔ pixel_clk(~27MHz)
+
+### 해결: aclk + clock enable 리팩토링
+
+모든 CNN 모듈의 `rising_edge(pixel_clk)`을 `rising_edge(aclk) + if pixel_ce='1'`로 변경.
+`falling_edge(pixel_clk)` 사용하는 모듈은 `negedge_ce` 신호를 별도로 생성.
+
+이렇게 하면:
+- 모든 로직이 **단일 클럭 도메인 (aclk, 150MHz)**에서 동작
+- Vivado 타이밍 분석이 정상 적용됨
+- CDC 문제 해소
+
+---
+
+*업데이트: 2026-04-02 — 시뮬레이션 성공, FPGA pixel_clk 문제 확정*
