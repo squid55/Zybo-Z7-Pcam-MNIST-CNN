@@ -1,15 +1,6 @@
 ------------------------------------------------------------------------
--- CNN Pcam Wrapper
--- Pcam AXI Stream → CNN → AXI-Lite Result 전체 래퍼
---
--- Vivado Block Design에서 이 모듈을 IP로 추가하여:
---   1. GammaCorrection 출력 AXI Stream을 T-탭으로 연결
---   2. AXI-Lite로 PS(ARM)에서 Prediction/Probability 읽기
---
--- Block Design 연결:
---   GammaCorrection.m_axis_video ─┬─→ VDMA (원본 경로 유지)
---                                 └─→ cnn_pcam_wrapper.s_axis_*
---   PS.M_AXI_GP0 → cnn_pcam_wrapper.S_AXI_* (결과 읽기)
+-- CNN Pcam Wrapper (v6 - aclk direct, no pixel_clk/BUFG)
+-- aclk을 CNN에 직접 전달. pixel_clk 생성/BUFG 불필요.
 ------------------------------------------------------------------------
 library ieee;
 use ieee.std_logic_1164.all;
@@ -22,31 +13,25 @@ use work.cnn_data_package.all;
 
 entity cnn_pcam_wrapper is
     generic (
-        -- Pcam 입력 해상도
         INPUT_WIDTH    : natural := 1280;
         INPUT_HEIGHT   : natural := 720;
-        -- CNN 파라미터
         CNN_IMG_SIZE   : natural := 448;
         CNN_OFFSET     : natural := 80;
         CNN_SIZE       : natural := 28
     );
     port (
-        -- Clock and Reset
         aclk           : in  std_logic;
         aresetn        : in  std_logic;
 
-        -- AXI Stream input (T-tap from GammaCorrection)
         s_axis_tdata   : in  std_logic_vector(23 downto 0);
         s_axis_tvalid  : in  std_logic;
         s_axis_tready  : out std_logic;
         s_axis_tlast   : in  std_logic;
         s_axis_tuser   : in  std_logic;
 
-        -- Direct outputs (active inference indicators)
         prediction_out : out std_logic_vector(3 downto 0);
         probability_out: out std_logic_vector(9 downto 0);
 
-        -- AXI-Lite Slave (PS reads CNN results)
         S_AXI_ARADDR   : in  std_logic_vector(3 downto 0);
         S_AXI_ARVALID  : in  std_logic;
         S_AXI_ARREADY  : out std_logic;
@@ -69,18 +54,16 @@ end entity cnn_pcam_wrapper;
 
 architecture rtl of cnn_pcam_wrapper is
 
-    -- Internal signals
-    signal rgb_stream_int : rgb_stream;
-    signal prediction_int : natural range 0 to NN_Layer_1_Outputs-1;
-    signal probability_int: CNN_Value_T;
+    signal rgb_stream_int  : rgb_stream;
+    signal prediction_int  : natural range 0 to NN_Layer_1_Outputs-1;
+    signal probability_int : CNN_Value_T;
 
 begin
 
-    -- Direct outputs for LED/debug
     prediction_out  <= std_logic_vector(to_unsigned(prediction_int, 4));
     probability_out <= std_logic_vector(to_unsigned(probability_int, 10));
 
-    -- AXI Stream → rgb_stream bridge
+    -- Bridge: aclk을 직접 New_Pixel로 전달 (pixel_clk/BUFG 불필요)
     u_bridge: entity work.axi_stream_to_rgb_stream
         generic map (
             INPUT_WIDTH  => INPUT_WIDTH,
@@ -97,7 +80,7 @@ begin
             oStream       => rgb_stream_int
         );
 
-    -- CNN core
+    -- CNN core (New_Pixel = aclk, 150MHz)
     u_cnn: entity work.cnn_top
         generic map (
             Input_Columns => CNN_IMG_SIZE,

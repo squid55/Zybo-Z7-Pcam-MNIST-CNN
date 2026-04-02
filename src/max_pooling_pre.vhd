@@ -31,10 +31,7 @@ architecture rtl of max_pooling_pre is
     constant RAM_Width : natural := Input_Columns / Filter_Columns;
 
     signal RAM_Addr_Out : natural range 0 to RAM_Width - 1;
-    signal RAM_Addr_In  : natural range 0 to RAM_Width - 1;
-    signal RAM_Data_In  : std_logic_vector(23 downto 0);
     signal RAM_Data_Out : std_logic_vector(23 downto 0);
-    signal RAM_Enable   : std_logic := '0';
 
     type RAM_T is array (RAM_Width-1 downto 0) of std_logic_vector(RAM_Bits-1 downto 0);
     signal Buffer_RAM : RAM_T := (others => (others => '0'));
@@ -47,22 +44,16 @@ begin
 
     oStream.New_Pixel <= iStream.New_Pixel;
 
-    -- RAM write
-    process(iStream.New_Pixel)
-    begin
-        if rising_edge(iStream.New_Pixel) then
-            if RAM_Enable = '1' then
-                Buffer_RAM(RAM_Addr_In) <= RAM_Data_In(RAM_Bits-1 downto 0);
-            end if;
-        end if;
-    end process;
-
+    -- RAM read (combinational)
     RAM_Data_Out(RAM_Bits-1 downto 0) <= Buffer_RAM(RAM_Addr_Out);
 
-    -- Main process
+    -- Main process (RAM write is now done directly here)
     process(iStream.New_Pixel)
         variable max_Col_Buf : rgb_data;
         variable max_Col_Cnt : natural range 0 to Filter_Columns-1 := Filter_Columns-1;
+        variable ram_wr_addr : natural range 0 to RAM_Width - 1;
+        variable ram_wr_data : std_logic_vector(RAM_Bits-1 downto 0);
+        variable ram_wr_en   : boolean;
     begin
         if rising_edge(iStream.New_Pixel) then
             iStream_Buf.R <= iStream.R;
@@ -80,6 +71,8 @@ begin
             oStream.B      <= oStream_Buf.B;
             oStream.Column <= oStream_Buf.Column;
             oStream.Row    <= oStream_Buf.Row;
+
+            ram_wr_en := false;
 
             if iStream_Buf.Column /= Col_Reg and iStream_Buf.Column < Input_Columns and iStream_Buf.Row < Input_Rows then
                 if max_Col_Cnt < Filter_Columns-1 then
@@ -132,19 +125,26 @@ begin
                         oStream_Buf.Column <= iStream_Buf.Column / Filter_Columns;
                         oStream_Buf.Row    <= iStream_Buf.Row / Filter_Rows;
                     else
-                        RAM_Data_In(7 downto 0) <= max_Col_Buf.R;
+                        -- Write intermediate max to RAM (FIX: was never written before!)
+                        ram_wr_data := (others => '0');
+                        ram_wr_data(7 downto 0) := max_Col_Buf.R;
                         if Input_Values > 1 then
-                            RAM_Data_In(15 downto 8) <= max_Col_Buf.G;
+                            ram_wr_data(15 downto 8) := max_Col_Buf.G;
                         end if;
                         if Input_Values > 2 then
-                            RAM_Data_In(23 downto 16) <= max_Col_Buf.B;
+                            ram_wr_data(23 downto 16) := max_Col_Buf.B;
                         end if;
+                        ram_wr_addr := iStream_Buf.Column / Filter_Columns;
+                        ram_wr_en := true;
                     end if;
-
-                    RAM_Addr_In <= iStream_Buf.Column / Filter_Columns;
                 end if;
 
                 RAM_Addr_Out <= iStream_Buf.Column / Filter_Columns;
+            end if;
+
+            -- RAM write (directly in main process, no separate enable signal)
+            if ram_wr_en then
+                Buffer_RAM(ram_wr_addr) <= ram_wr_data;
             end if;
 
             Col_Reg <= iStream_Buf.Column;
